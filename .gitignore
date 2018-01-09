@@ -1,0 +1,11 @@
+docs/_build
+*.pyc
+build/
+dist/
+*.egg-info/
+.cache/
+.coverage
+coverage.xml
+cookies.txt
+log.log
+test.py
