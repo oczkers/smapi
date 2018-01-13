@@ -3,6 +3,7 @@ import re
 import urllib.parse
 import time
 import random
+from bs4 import BeautifulSoup
 # from clint.textui import colored
 
 headers = {
@@ -49,3 +50,54 @@ def price(id, name):
         return 0
     # return int(rc['lowest_sell_order'])
     return int(rc['highest_buy_order'])
+
+
+def orders():  # TODO: login required to work of course
+    orders = {'buy': [],
+              'sell': []}
+    # sell orders
+    start = 0
+    count = 100
+    while True:
+        params = {'query': '',
+                  'start': start,
+                  'count': count}
+        rc = r.get('https://steamcommunity.com/market/mylistings/render/?query=&start=10&count=10', params=params).json()
+        for game_id in rc['assets']:
+            for context_id in game_id:
+                for order in context_id:
+                    orders['sell'].append({'game_id': order['appid'],
+                                           'order_id': order['id'],
+                                           'amount': order['amount'],
+                                           'original_amount': order['original_amount'],
+                                           'status': order['status'],  # 2 active listing
+                                           'item_name': order['name'],  # market_name  market_hash_name
+                                           'commodity': order['commodity'], })
+                    # TODO: price in order['hovers']
+        if len() < count:  # use total_count / num_active_listings instead?
+            break
+        start += count
+
+    # buy orders
+    rc = r.get('https://steamcommunity.com/market/').text
+    bs = BeautifulSoup(rc)
+    divs = bs.findAll('div', {'class': 'market_listing_row market_recent_listing_row'})
+    for div in divs:
+        order_id = int(div.attrs['id'].replace('mybuyorder_', ''))
+        game_name = div.find('span', {'class': 'market_listing_game_name'}).text
+        # item_name = div.find('span', {'class': 'market_listing_item_name'}).a.text
+        game_id, item_name = div.find('span', {'class': 'market_listing_item_name'}).a.attrs['href'].split('/')[-2:]
+        item_id, item_name = re.search('([0-9]+\-)?(.+)', item_name).groups()
+        # amount = div.span()[0].span.text.replace(' @', '')
+        # amount = div.find('span', {'class': 'market_listing_inline_buyorder_qty'}).text.replace(' @', '')
+        amount, price = list(div.find('span', {'class': 'market_listing_price'}).strings)[1:]
+        amount = amount.replace(' @', '')
+        price = price.strip()  # remove currency code
+        orders['buy'].append({'order_id': order_id,
+                              'game_id': game_id,
+                              'game_name': game_name,
+                              'item_id': item_id,
+                              'item_name': item_name,
+                              'amount': amount,
+                              'price': price, })
+    return orders
