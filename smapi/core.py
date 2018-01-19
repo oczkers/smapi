@@ -8,6 +8,7 @@ import base64
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from bs4 import BeautifulSoup
+from urllib.parse import unquote
 try:
     from cookielib import LWPCookieJar
 except ImportError:
@@ -116,7 +117,7 @@ class Core(object):
         name = urllib.parse.quote('%s Booster Pack' % name)
         url = 'https://steamcommunity.com/market/listings/753/%s-%s' % (id, name)
         print(url)
-        rc = r.get(url).text  # 753 = (normal?) booster pack
+        rc = self.r.get(url).text  # 753 = (normal?) booster pack
         open('log.log', 'w').write(rc)
         if "You've made too many requests recently. Please wait and try your request again later." in rc:
             print("You've made too many requests recently. Please wait and try your request again later.")
@@ -129,7 +130,7 @@ class Core(object):
                   'currency': 6,  # 6 PLN, 3 EUR
                   'item_nameid': item_nameid,
                   'two_factor': 0}
-        rc = r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
+        rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
         # if rc['lowest_sell_order'] is None:
         #     return None
         if rc['highest_buy_order'] is None:
@@ -174,6 +175,7 @@ class Core(object):
             # item_name = div.find('span', {'class': 'market_listing_item_name'}).a.text
             game_id, item_name = div.find('span', {'class': 'market_listing_item_name'}).a.attrs['href'].split('/')[-2:]
             item_id, item_name = re.search('([0-9]+\-)?(.+)', item_name).groups()
+            item_name = unquote(item_name)  # unquote by bs?
             # amount = div.span()[0].span.text.replace(' @', '')
             # amount = div.find('span', {'class': 'market_listing_inline_buyorder_qty'}).text.replace(' @', '')
             amount, price = list(div.find('span', {'class': 'market_listing_price'}).strings)[1:]
