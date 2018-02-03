@@ -46,6 +46,7 @@ class Core(object):
         self.r = requests.Session()  # init/reset requests session object
         self.r.headers = headers.copy()  # i'm chrome browser now ;-)
         self.cookies_file = cookies_file
+        self.currency = 6  # 6 PLN, 3 EUR
         # load saved cookies/session
         if self.cookies_file:
             self.r.cookies = LWPCookieJar(self.cookies_file)
@@ -59,6 +60,8 @@ class Core(object):
         open('smapi.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
             self.login(username, passwd)
+        # rc = self.r.get('https://steamcommunity.com/id/oczun/').text
+        # self.steam_id = re.search('g_steamID = "76561198011812285";', rc).group(1)
 
     def saveSession(self):
         '''Saves cookies/session.'''
@@ -107,6 +110,29 @@ class Core(object):
         self.saveSession()
         return True
 
+    def inventory(self, app_id=753):
+        params = {'l': 'english',
+                  'count': 2000,
+                  'market': 1, }  # only marketable
+        url = 'https://steamcommunity.com/inventory/76561198011812285/%s/%s' % (app_id, self.currency)
+        rc = self.r.get(url, params=params).json()
+
+        descs = {i['classid']: i for i in rc['descriptions']}
+        # items = [descs[i['classid']] for i in rc['assets'] if descs[i['classid']].get('market_hash_name')]
+        items = {}
+        for i in rc['assets']:
+            if not descs[i['classid']].get('market_hash_name'):  # not marketable?
+                continue
+            elif i['classid'] in items.keys():  # duplicate
+                items[i['classid']]['amount'] += 1
+            else:
+                items[i['classid']] = (descs[i['classid']])
+                items[i['classid']]['amount'] = 1
+
+        # names = [i['market_hash_name'] for i in items if i.get('market_hash_name')]
+
+        return items
+
     def price(self, id, name):
         # time.sleep(random.randint(15, 25))
         time.sleep(random.randint(17, 25))
@@ -114,10 +140,10 @@ class Core(object):
         # encode name?
         if name == 'MajorMinor':  # fix database
             name = 'Major-Minor'
-        name = urllib.parse.quote('%s Booster Pack' % name)
-        url = 'https://steamcommunity.com/market/listings/753/%s-%s' % (id, name)
+        name = urllib.parse.quote(name)
+        url = 'https://steamcommunity.com/market/listings/%s/%s' % (id, name)
         print(url)
-        rc = self.r.get(url).text  # 753 = (normal?) booster pack
+        rc = self.r.get(url).text  # 753 = steam items?
         open('log.log', 'w').write(rc)
         if "You've made too many requests recently. Please wait and try your request again later." in rc:
             print("You've made too many requests recently. Please wait and try your request again later.")
@@ -127,16 +153,13 @@ class Core(object):
         # get price
         params = {'country': 'PL',
                   'language': 'english',
-                  'currency': 6,  # 6 PLN, 3 EUR
+                  'currency': self.currency,
                   'item_nameid': item_nameid,
                   'two_factor': 0}
         rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
-        # if rc['lowest_sell_order'] is None:
-        #     return None
-        if rc['highest_buy_order'] is None:
-            return 0
-        # return int(rc['lowest_sell_order'])
-        return int(rc['highest_buy_order'])
+        sell = int(rc.get('lowest_sell_order', 0))
+        buy = int(rc.get('highest_buy_order', 0))
+        return {'sell': sell, 'buy': buy}
 
     def orders(self):  # TODO: login required to work of course
         orders = {'buy': [],
