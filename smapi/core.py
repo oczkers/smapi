@@ -157,8 +157,8 @@ class Core(object):
                   'item_nameid': item_nameid,
                   'two_factor': 0}
         rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
-        sell = int(rc.get('lowest_sell_order', 0))
-        buy = int(rc.get('highest_buy_order', 0))
+        sell = int(rc['lowest_sell_order'] or 0)
+        buy = int(rc['highest_buy_order'] or 0)
         return {'sell': sell, 'buy': buy}
 
     def orders(self):  # TODO: login required to work of course
