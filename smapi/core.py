@@ -1,10 +1,13 @@
 import requests
 import re
 import urllib.parse
+import json
 import time
 import random
 import pyotp
 import base64
+import datetime
+from dateutil import parser
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from bs4 import BeautifulSoup
@@ -148,6 +151,23 @@ class Core(object):
         if "You've made too many requests recently. Please wait and try your request again later." in rc:
             print("You've made too many requests recently. Please wait and try your request again later.")
             asd
+
+        # history parse (only volume for now)
+        history = {}
+        history_raw = json.loads(re.search('var line1\=(\[.+\])', rc).group(1))
+        for i in history_raw:
+            i_date = parser.parse(i[0][:-4]).date()
+            print(i[0][-6:-4])
+            if i[0][-6:-4] != '01' and i_date in history.keys():
+                history[i_date] += int(i[2])
+            else:
+                history[i_date] = int(i[2])
+
+        # average volume
+        days = 90
+        days = min(datetime.date.today() - next(iter(history)), datetime.timedelta(days=days))  # days cannot be bigger than time since first transaction
+        vol = sum([history[i] for i in history if i > datetime.date.today() - days]) / days.days  # average daily volume in last x days
+
         item_nameid = re.search('Market_LoadOrderSpread\( ([0-9]+) \);', rc).group(1)
 
         # get price
