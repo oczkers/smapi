@@ -63,6 +63,9 @@ class Core(object):
         open('smapi.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
             self.login(username, passwd)
+            # TODO: get session_id
+        else:
+            self.session_id = re.search('g_sessionID = "(.+?)";', rc).group(1)
         # rc = self.r.get('https://steamcommunity.com/id/oczun/').text
         # self.steam_id = re.search('g_steamID = "76561198011812285";', rc).group(1)
 
@@ -128,9 +131,12 @@ class Core(object):
                 continue
             elif i['classid'] in items.keys():  # duplicate
                 items[i['classid']]['amount'] += 1
+                items[i['classid']]['asset_ids'].append(i['assetid'])
             else:
                 items[i['classid']] = (descs[i['classid']])
+                items[i['classid']]['contextid'] = i['contextid']
                 items[i['classid']]['amount'] = 1
+                items[i['classid']]['asset_ids'] = [i['assetid']]
 
         # names = [i['market_hash_name'] for i in items if i.get('market_hash_name')]
 
@@ -152,12 +158,11 @@ class Core(object):
             print("You've made too many requests recently. Please wait and try your request again later.")
             asd
 
-        # history parse (only volume for now)
+        # # history parse (only volume for now)
         history = {}
         history_raw = json.loads(re.search('var line1\=(\[.+\])', rc).group(1))
         for i in history_raw:
             i_date = parser.parse(i[0][:-4]).date()
-            print(i[0][-6:-4])
             if i[0][-6:-4] != '01' and i_date in history.keys():
                 history[i_date] += int(i[2])
             else:
@@ -177,9 +182,15 @@ class Core(object):
                   'item_nameid': item_nameid,
                   'two_factor': 0}
         rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
-        sell = int(rc['lowest_sell_order'] or 0)
-        buy = int(rc['highest_buy_order'] or 0)
-        return {'sell': sell, 'buy': buy}
+        sell_min = int(rc.get('lowest_sell_order', 0)) / 100
+        buy_min = int(rc.get('highest_buy_order', 0)) / 100
+        sell = [(i[0], i[1]) for i in rc['sell_order_graph']]
+        buy = [(i[0], i[1]) for i in rc['buy_order_graph']]
+        return {'sell_min': sell_min,
+                'sell': sell,
+                'buy_min': buy_min,
+                'buy': buy,
+                'vol': vol}
 
     def orders(self):  # TODO: login required to work of course
         orders = {'buy': [],
@@ -232,3 +243,38 @@ class Core(object):
                                   'amount': amount,
                                   'price': price, })
         return orders
+
+    def sell(self, appid, assetid, contextid, price):
+        if price < 1:  # 0.15 -> 15
+            price = int(price * 100)
+        # fees
+        if price < 20:
+            price -= 2
+        elif price < 30:
+            price -= 3
+        elif price < 40:
+            price -= 4
+        elif price < 50:
+            price -= 6
+        else:
+            asdasddsa
+        data = {'amount': 1,
+                'appid': appid,
+                'assetid': assetid,
+                'contextid': contextid,
+                'price': price,
+                'sessionid': self.session_id}
+        print(data)
+        self.r.headers['Referer'] = 'https://steamcommunity.com/id/oczun/inventory/'
+        rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data).json()
+        open('smapi.log', 'w').write(json.dumps(rc))
+        if not rc:
+            print('invalid response')
+            asdasdad
+        elif not rc['success']:
+            if rc['message'] == 'You already have a listing for this item pending confirmation. Please confirm or cancel the existing listing.':
+                pass
+            else:
+                print(rc)
+            return False
+        return True
