@@ -18,6 +18,8 @@ except ImportError:
     from http.cookiejar import LWPCookieJar
 # from clint.textui import colored
 
+from .exceptions import SmapiError
+
 headers = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -63,9 +65,10 @@ class Core(object):
         open('smapi.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
             self.login(username, passwd)
-            # TODO: get session_id
-        else:
-            self.session_id = re.search('g_sessionID = "(.+?)";', rc).group(1)
+            # TODO?: detect session_id in login
+            rc = self.r.get('https://steamcommunity.com/login/home/').text
+            open('smapi.log', 'w').write(rc)
+        self.session_id = re.search('g_sessionID = "(.+?)";', rc).group(1)
         # rc = self.r.get('https://steamcommunity.com/id/oczun/').text
         # self.steam_id = re.search('g_steamID = "76561198011812285";', rc).group(1)
 
@@ -116,12 +119,14 @@ class Core(object):
         self.saveSession()
         return True
 
-    def inventory(self, app_id=753):
+    def inventory(self, app_id=753, marketable_only=True):
         params = {'l': 'english',
-                  'count': 2000,
-                  'market': 1, }  # only marketable
+                  'count': 2000}
+        if marketable_only:
+            params['market'] = 1
         url = 'https://steamcommunity.com/inventory/76561198011812285/%s/%s' % (app_id, self.currency)
         rc = self.r.get(url, params=params).json()
+        open('smapi.log', 'w').write(json.dumps(rc))
 
         descs = {i['classid']: i for i in rc['descriptions']}
         # items = [descs[i['classid']] for i in rc['assets'] if descs[i['classid']].get('market_hash_name')]
@@ -141,6 +146,16 @@ class Core(object):
         # names = [i['market_hash_name'] for i in items if i.get('market_hash_name')]
 
         return items
+
+    def unpack(self, app_id, item_id):  # unpack booster
+        data = {'appid': app_id,
+                'communityitemid': item_id,
+                'sessionid': self.session_id}
+        self.r.headers['X-Requested-With'] = 'XMLHttpRequest'
+        rc = self.r.post('https://steamcommunity.com/id/oczun/ajaxunpackbooster/', data=data).json()
+        del self.r.headers['X-Requested-With']
+        open('smapi.log', 'w').write(json.dumps(rc))
+        return rc['success'] == 1
 
     def price(self, id, name):
         # time.sleep(random.randint(15, 25))
@@ -182,8 +197,9 @@ class Core(object):
                   'item_nameid': item_nameid,
                   'two_factor': 0}
         rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
-        sell_min = int(rc.get('lowest_sell_order', 0)) / 100
-        buy_min = int(rc.get('highest_buy_order', 0)) / 100
+        open('smapi.log', 'w').write(json.dumps(rc))
+        sell_min = int(rc['lowest_sell_order'] or 0) / 100
+        buy_min = int(rc['highest_buy_order'] or 0) / 100
         sell = [(i[0], i[1]) for i in rc['sell_order_graph']]
         buy = [(i[0], i[1]) for i in rc['buy_order_graph']]
         return {'sell_min': sell_min,
@@ -257,7 +273,7 @@ class Core(object):
         elif price < 50:
             price -= 6
         else:
-            asdasddsa
+            SmapiError('more fees reduction needs to be implemented')  # TODO
         data = {'amount': 1,
                 'appid': appid,
                 'assetid': assetid,
@@ -267,10 +283,10 @@ class Core(object):
         print(data)
         self.r.headers['Referer'] = 'https://steamcommunity.com/id/oczun/inventory/'
         rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data).json()
+        del self.r.headers['Referer']
         open('smapi.log', 'w').write(json.dumps(rc))
         if not rc:
-            print('invalid response')
-            asdasdad
+            SmapiError('invalid response')
         elif not rc['success']:
             if rc['message'] == 'You already have a listing for this item pending confirmation. Please confirm or cancel the existing listing.':
                 pass
@@ -278,3 +294,22 @@ class Core(object):
                 print(rc)
             return False
         return True
+
+    def buy(self, appid, market_hash_name, quantity, price, currency=6):
+        quantity = int(quantity)
+        price_total = int(float(price) * 100 * int(quantity))
+        data = {'appid': appid,
+                'currency': currency,
+                'market_hash_name': market_hash_name,
+                'price_total': price_total,
+                'quantity': quantity,
+                'sessionid': self.session_id}
+        print(data)
+        self.r.headers['Referer'] = 'https://steamcommunity.com/market/listings/%s/%s' % (appid, market_hash_name)
+        rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
+        del self.r.headers['Referer']
+        print(rc)
+        if rc['success'] == 25:
+            raise SmapiError('You need more wallet balance to make this order.')
+        else:
+            raise SmapiError('unknown status')
