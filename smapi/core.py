@@ -243,21 +243,25 @@ class Core(object):
             order_id = int(div.attrs['id'].replace('mybuyorder_', ''))
             game_name = div.find('span', {'class': 'market_listing_game_name'}).text
             # item_name = div.find('span', {'class': 'market_listing_item_name'}).a.text
-            game_id, item_name = div.find('span', {'class': 'market_listing_item_name'}).a.attrs['href'].split('/')[-2:]
-            item_id, item_name = re.search('([0-9]+\-)?(.+)', item_name).groups()
-            item_name = unquote(item_name)  # unquote by bs?
+            game_id, market_hash_name = div.find('span', {'class': 'market_listing_item_name'}).a.attrs['href'].split('/')[-2:]
+            market_hash_name = unquote(market_hash_name)
+            item_id, item_name = re.search('([0-9]+?)\-(.+)', market_hash_name).groups()
+            # item_name = unquote(item_name)  # unquote by bs?
             # amount = div.span()[0].span.text.replace(' @', '')
             # amount = div.find('span', {'class': 'market_listing_inline_buyorder_qty'}).text.replace(' @', '')
             amount, price = list(div.find('span', {'class': 'market_listing_price'}).strings)[1:]
             amount = amount.replace(' @', '')
-            price = price.strip()  # remove currency code
+            # price = price.strip()  # remove currency code
+            price = re.match('([0-9\,]+).+', price.strip()).group(1)
+            price = float(price.replace(',', '.'))
             orders['buy'].append({'order_id': order_id,
                                   'game_id': game_id,
                                   'game_name': game_name,
                                   'item_id': item_id,
                                   'item_name': item_name,
                                   'amount': amount,
-                                  'price': price, })
+                                  'price': price,
+                                  'market_hash_name': market_hash_name})
         return orders
 
     def sell(self, appid, assetid, contextid, price):
@@ -290,6 +294,8 @@ class Core(object):
         elif not rc['success']:
             if rc['message'] == 'You already have a listing for this item pending confirmation. Please confirm or cancel the existing listing.':
                 pass
+            elif rc['message'] == 'You have too many listings pending confirmation. Please confirm or cancel some before attempting to list more.':
+                raise SmapiError('You have too many listings pending confirmation. Please confirm or cancel some before attempting to list more.')
             else:
                 print(rc)
             return False
@@ -313,3 +319,16 @@ class Core(object):
             raise SmapiError('You need more wallet balance to make this order.')
         else:
             raise SmapiError('unknown status')
+
+    def cancelBuy(self, order_id):
+        data = {'buy_orderid': order_id,
+                'sessionid': self.session_id}
+        self.r.headers['Referer'] = 'https://steamcommunity.com/market/'
+        self.r.headers['X-Requested-With'] = 'XMLHttpRequest'
+        self.r.headers['X-Prototype-Version'] = '1.7'
+        rc = self.r.post('https://steamcommunity.com/market/cancelbuyorder/', data=data).json()
+        del self.r.headers['Referer']
+        del self.r.headers['X-Requested-With']
+        del self.r.headers['X-Prototype-Version']
+        # print(rc)
+        return rc['success'] == 1
