@@ -174,19 +174,22 @@ class Core(object):
             asd
 
         # # history parse (only volume for now)
-        history = {}
-        history_raw = json.loads(re.search('var line1\=(\[.+\])', rc).group(1))
-        for i in history_raw:
-            i_date = parser.parse(i[0][:-4]).date()
-            if i[0][-6:-4] != '01' and i_date in history.keys():
-                history[i_date] += int(i[2])
-            else:
-                history[i_date] = int(i[2])
+        if 'var line1' in rc:
+            history = {}
+            history_raw = json.loads(re.search('var line1\=(\[.+\])', rc).group(1))
+            for i in history_raw:
+                i_date = parser.parse(i[0][:-4]).date()
+                if i[0][-6:-4] != '01' and i_date in history.keys():
+                    history[i_date] += int(i[2])
+                else:
+                    history[i_date] = int(i[2])
 
-        # average volume
-        days = 90
-        days = min(datetime.date.today() - next(iter(history)), datetime.timedelta(days=days))  # days cannot be bigger than time since first transaction
-        vol = sum([history[i] for i in history if i > datetime.date.today() - days]) / days.days  # average daily volume in last x days
+            # average volume
+            days = 90
+            days = min(datetime.date.today() - next(iter(history)), datetime.timedelta(days=days))  # days cannot be bigger than time since first transaction
+            vol = sum([history[i] for i in history if i > datetime.date.today() - days]) / days.days  # average daily volume in last x days
+        else:
+            vol = 0
 
         item_nameid = re.search('Market_LoadOrderSpread\( ([0-9]+) \);', rc).group(1)
 
@@ -303,7 +306,9 @@ class Core(object):
 
     def buy(self, appid, market_hash_name, quantity, price, currency=6):
         quantity = int(quantity)
-        price_total = int(float(price) * 100 * int(quantity))
+        if price < 0.03:  # minimum value
+            price = 0.03
+        price_total = int(price * 100 * int(quantity))
         data = {'appid': appid,
                 'currency': currency,
                 'market_hash_name': market_hash_name,
@@ -315,6 +320,8 @@ class Core(object):
         rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
         del self.r.headers['Referer']
         print(rc)
+        if rc['success'] == 1:
+            return rc['buy_orderid']
         if rc['success'] == 25:
             raise SmapiError('You need more wallet balance to make this order.')
         else:
