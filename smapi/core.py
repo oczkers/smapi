@@ -12,6 +12,7 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from bs4 import BeautifulSoup
 from urllib.parse import unquote
+from steam import guard  # https://github.com/ValvePython/steam
 try:
     from cookielib import LWPCookieJar
 except ImportError:
@@ -21,7 +22,7 @@ except ImportError:
 from .exceptions import SmapiError
 
 headers = {
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:65.0) Gecko/20100101 Firefox/65.0',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Encoding': 'gzip,deflate,sdch',
     'Accept-Language': 'en-US,en;q=0.8',
@@ -44,10 +45,10 @@ def hashPasswd(passwd, mod, exp):
 
 
 class Core(object):
-    def __init__(self, username, passwd, totp=None):
+    def __init__(self, username, passwd, secrets=None):
         self.username = username
         self.passwd = passwd
-        self.totp = totp
+        self.secrets = secrets
         self.r = requests.Session()  # init/reset requests session object
         self.r.headers = headers.copy()  # i'm chrome browser now ;-)
         self.cookies_file = cookies_file
@@ -84,12 +85,13 @@ class Core(object):
             return False
         passwd_hash = hashPasswd(passwd, rc['publickey_mod'], rc['publickey_exp'])
         # login
-        if self.totp:
-            twofactor_code = pyotp.TOTP(self.totp).now()
+        # if self.totp:  # TODO: test it
+        #     # twofactor_code = pyotp.TOTP(self.totp).now()
+        #     twofactor_code = guard.generate_twofactor_code(self.totp)
         data = {'password': passwd_hash,
                 'username': username,
                 # 'oauth_client_id': '',  # used in mobile app
-                'twofactorcode': twofactor_code or '',
+                'twofactorcode': twofactor_code or '',  # is it even working here?
                 'emailauth': email_code or '',
                 'loginfriendlyname': auth_name or '',
                 'captchagid': -1,
@@ -101,13 +103,20 @@ class Core(object):
         rc = self.r.post('https://steamcommunity.com/login/dologin/', data=data)
         open('log.log', 'w').write(rc.text)  # DEBUG
         rc = rc.json()
+        print(rc)
 
         if rc['success'] is False:
             if rc.get('emailauth_needed'):
                 email_code = input('email auth code: ')
                 self.login(username, passwd, email_code=email_code, auth_name=auth_name)
             elif rc.get('requires_twofactor'):
-                twofactor_code = input('two factor code: ')
+                print('two factor')
+                if self.secrets:
+                    sa = guard.SteamAuthenticator(secrets=self.secrets)
+                    twofactor_code = sa.get_code()
+                else:
+                    twofactor_code = input('two factor code: ')
+                print(twofactor_code)
                 self.login(username, passwd, twofactor_code=twofactor_code)
             elif rc.get('message') == 'Incorrect login.':
                 print('Incorrect login.')
@@ -126,6 +135,10 @@ class Core(object):
             params['market'] = 1
         url = 'https://steamcommunity.com/inventory/76561198011812285/%s/%s' % (app_id, self.currency)
         rc = self.r.get(url, params=params).json()
+        # open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
+        if rc.get('error') and 'The request is a duplicate and the action has already occurred in the past, ignored this time' in rc.get('error'):
+            time.sleep(30)
+            rc = self.r.get(url, params=params).json()
         open('smapi.log', 'w').write(json.dumps(rc))
 
         descs = {i['classid']: i for i in rc['descriptions']}
@@ -162,13 +175,30 @@ class Core(object):
         time.sleep(random.randint(17, 25))
         # get item_nameid (this can be skipped when item_nameid is in database)
         # encode name?
-        if name == 'MajorMinor':  # fix database
-            name = 'Major-Minor'
+        print(name)
+        if 'MajorMinor' in name:  # fix database
+            name.replace('MajorMinor', 'Major-Minor')
+        elif name == '283940-Freddi Fish and the Case of the Missing Kelp Seeds Booster Pack':
+            name = '283940-Freddi Fish and The Case of the Missing Kelp Seeds Booster Pack'
+        elif name == '477310-Space Hole Booster Pack':
+            name = '477310-Space Hole 2016 Booster Pack'
         name = urllib.parse.quote(name)
         url = 'https://steamcommunity.com/market/listings/%s/%s' % (id, name)
         print(url)
-        rc = self.r.get(url).text  # 753 = steam items?
+        try:
+            rc = self.r.get(url)
+            open('smapi.log', 'wb').write(rc.content)
+            rc = rc.text  # 753 = steam items?
+        except requests.exceptions.ConnectionError as e:
+            print('>>> connection error')
+            time.sleep(10)
+            rc = self.r.get(url).text  # 753 = steam items?
         open('log.log', 'w').write(rc)
+        if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc:
+            print('temporary error, waiting 10 seconds and retrying')
+            time.sleep(10)
+            rc = self.r.get(url).text  # 753 = steam items?
+            open('log.log', 'w').write(rc)
         if "You've made too many requests recently. Please wait and try your request again later." in rc:
             print("You've made too many requests recently. Please wait and try your request again later.")
             asd
@@ -199,7 +229,13 @@ class Core(object):
                   'currency': self.currency,
                   'item_nameid': item_nameid,
                   'two_factor': 0}
-        rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
+        rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params)
+        open('smapi.log', 'w').write(rc.text)
+        rc = rc.json()
+        if rc['success'] == 16:  # DEBUG?
+            print('to many requests? waiting 15 seconds and retrying')
+            time.sleep(15)
+            rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params).json()
         open('smapi.log', 'w').write(json.dumps(rc))
         sell_min = int(rc['lowest_sell_order'] or 0) / 100
         buy_min = int(rc['highest_buy_order'] or 0) / 100
@@ -221,7 +257,9 @@ class Core(object):
             params = {'query': '',
                       'start': start,
                       'count': count}
-            rc = self.r.get('https://steamcommunity.com/market/mylistings/render/', params=params).json()
+            rc = self.r.get('https://steamcommunity.com/market/mylistings/render/', params=params)
+            open('smapi.log', 'w').write(rc.text)
+            rc = rc.json()
             for game_id in rc['assets']:
                 for context_id in rc['assets'][game_id]:
                     for order_id in rc['assets'][game_id][context_id]:
@@ -269,29 +307,37 @@ class Core(object):
 
     def sell(self, appid, assetid, contextid, price):
         if price < 1:  # 0.15 -> 15
-            price = int(price * 100)
+            _price = int(price * 100)
+        else:
+            SmapiError('expensive item')  # TODO
         # fees
-        if price < 20:
-            price -= 2
-        elif price < 30:
-            price -= 3
-        elif price < 40:
-            price -= 4
-        elif price < 50:
-            price -= 6
+        if _price < 20:
+            _price -= 2
+        elif _price < 30:
+            _price -= 3
+        elif _price < 40:
+            _price -= 4
+        elif _price < 50:
+            _price -= 6
         else:
             SmapiError('more fees reduction needs to be implemented')  # TODO
         data = {'amount': 1,
                 'appid': appid,
                 'assetid': assetid,
                 'contextid': contextid,
-                'price': price,
+                'price': _price,
                 'sessionid': self.session_id}
         print(data)
-        self.r.headers['Referer'] = 'https://steamcommunity.com/id/oczun/inventory/'
-        rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data).json()
+        self.r.headers['Referer'] = 'https://steamcommunity.com/id/oczun/inventory?modal=1&market=1'
+        rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data)
+        if '502 Bad Gateway' in rc.text:
+            print('502 Bad Gateway, retrying in 5 seconds')
+            time.sleep(5)
+            rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data)
+        # 502 Bad Gateway
+        open('smapi.log', 'w').write(rc.text)
+        rc = rc.json()
         del self.r.headers['Referer']
-        open('smapi.log', 'w').write(json.dumps(rc))
         if not rc:
             SmapiError('invalid response')
         elif not rc['success']:
@@ -299,6 +345,15 @@ class Core(object):
                 pass
             elif rc['message'] == 'You have too many listings pending confirmation. Please confirm or cancel some before attempting to list more.':
                 raise SmapiError('You have too many listings pending confirmation. Please confirm or cancel some before attempting to list more.')
+            elif rc['message'] == 'You cannot sell any items until your previous action completes.':
+                print('You cannot sell any items until your previous action completes.')
+                time.sleep(60 * 5)
+                return self.sell(appid=appid, assetid=assetid, contextid=contextid, price=price)
+            elif rc['message'] == 'There was a problem listing your item. Refresh the page and try again.':
+                print('There was a problem listing your item. Refresh the page and try again.')
+                # time.sleep(60 * 5)
+                time.sleep(random.randint(5, 20))
+                return self.sell(appid=appid, assetid=assetid, contextid=contextid, price=price)
             else:
                 print(rc)
             return False
@@ -306,6 +361,7 @@ class Core(object):
 
     def buy(self, appid, market_hash_name, quantity, price, currency=6):
         quantity = int(quantity)
+        print(price)
         if price < 0.03:  # minimum value
             price = 0.03
         price_total = int(price * 100 * int(quantity))
@@ -317,12 +373,19 @@ class Core(object):
                 'sessionid': self.session_id}
         print(data)
         self.r.headers['Referer'] = 'https://steamcommunity.com/market/listings/%s/%s' % (appid, market_hash_name)
-        rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
+        try:
+            rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
+        except UnicodeEncodeError:
+            return False
         del self.r.headers['Referer']
         print(rc)
         if rc['success'] == 1:
             return rc['buy_orderid']
-        if rc['success'] == 25:
+        elif rc['success'] in (8, 16, 20):  # 'Sorry! We had trouble hearing back from the Steam servers about your order. Double check whether or not your order has actually been created or filled. If not, then please try again later.'
+            print('Sorry! We had trouble hearing back from the Steam servers about your order. Double check whether or not your order has actually been created or filled. If not, then please try again later.')
+            time.sleep(60)
+            return self.buy(appid=appid, market_hash_name=market_hash_name, quantity=quantity, price=price, currency=currency)
+        elif rc['success'] == 25:
             raise SmapiError('You need more wallet balance to make this order.')
         else:
             raise SmapiError('unknown status')
@@ -333,9 +396,14 @@ class Core(object):
         self.r.headers['Referer'] = 'https://steamcommunity.com/market/'
         self.r.headers['X-Requested-With'] = 'XMLHttpRequest'
         self.r.headers['X-Prototype-Version'] = '1.7'
-        rc = self.r.post('https://steamcommunity.com/market/cancelbuyorder/', data=data).json()
+        rc = self.r.post('https://steamcommunity.com/market/cancelbuyorder/', data=data)
+        open('smapi.log', 'w').write(rc.text)
+        rc = rc.json()
         del self.r.headers['Referer']
         del self.r.headers['X-Requested-With']
         del self.r.headers['X-Prototype-Version']
         # print(rc)
         return rc['success'] == 1
+
+    def cleanNotifications(self):
+        self.r.get('https://steamcommunity.com/id/oczun/inventory/')
