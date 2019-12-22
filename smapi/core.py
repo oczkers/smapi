@@ -3,15 +3,16 @@ import re
 import urllib.parse
 import json
 import time
-import random
-import pyotp
+# import random
+# import pyotp
 import base64
 import datetime
+from html import unescape
 from dateutil import parser
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
-from bs4 import BeautifulSoup
-from urllib.parse import unquote
+# from bs4 import BeautifulSoup
+# from urllib.parse import unquote
 from steam import guard  # https://github.com/ValvePython/steam
 try:
     from cookielib import LWPCookieJar
@@ -22,7 +23,7 @@ except ImportError:
 from .exceptions import SmapiError
 
 headers = {
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:65.0) Gecko/20100101 Firefox/65.0',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:70.0) Gecko/20100101 Firefox/70.0',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Encoding': 'gzip,deflate,sdch',
     'Accept-Language': 'en-US,en;q=0.8',
@@ -44,8 +45,46 @@ def hashPasswd(passwd, mod, exp):
     return base64.b64encode(cipher.encrypt(passwd.encode()))
 
 
+# def priceCutFee(price):  # almost good
+#     price = price * 100
+#     c_price = floor(price / 1.15)
+
+#     if c_price + 2 >= price:  # lowest prices under minimum fees
+#         return price - 2
+
+#     steam_fee = floor(c_price * 0.05)
+#     dev_fee = floor(c_price * 0.1)
+
+#     while c_price + steam_fee + dev_fee < price:
+#         c_price += 1
+#         steam_fee = floor(c_price * 0.05)
+#         dev_fee = floor(c_price * 0.1)
+
+#     return c_price
+
+def priceCutFee(_price):
+    p = _price
+    fee = 2  # <22
+    p -= 21
+    while True:  # TODO: refactorization
+        if p > 0:
+            p -= 11
+            fee += 1
+            if p > 11:
+                p -= 1
+                fee += 1
+            if p > 0:
+                p -= 11
+                fee += 1
+            else:
+                break
+        else:
+            break
+    return _price - fee
+
+
 class Core(object):
-    def __init__(self, username, passwd, secrets=None, currency=3, country='PL'):
+    def __init__(self, username, passwd, secrets=None, currency=3, country='PL', android_id=None):
         self.username = username
         self.passwd = passwd
         self.secrets = secrets
@@ -54,6 +93,7 @@ class Core(object):
         self.cookies_file = cookies_file
         self.currency = currency  # 6 PLN, 3 EUR, 18 UAH
         self.country = country  # PL, ?, UA
+        self.android_id = android_id
         self.sa = guard.SteamAuthenticator(secrets=self.secrets)
         # load saved cookies/session
         if self.cookies_file:
@@ -138,15 +178,24 @@ class Core(object):
         url = 'https://steamcommunity.com/inventory/%s/%s/6' % (self.steam_id, app_id)  # 6 = contextid
         rc = self.r.get(url, params=params).json()
         # open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
-        if rc.get('error') and 'The request is a duplicate and the action has already occurred in the past, ignored this time' in rc.get('error'):
-            time.sleep(30)
+        assets = rc['assets']
+        descriptions = rc['descriptions']
+        while rc.get('more_items') == 1:
+            params['start_assetid'] = rc['last_assetid']
             rc = self.r.get(url, params=params).json()
-        open('smapi.log', 'w').write(json.dumps(rc))
+            open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
+            assets.extend(rc['assets'])
+            descriptions.extend(rc['descriptions'])  # TODO: it's ugly
+        print('Marketable ttems in inventory: %s' % len(assets))
+        # if rc.get('error') and 'The request is a duplicate and the action has already occurred in the past, ignored this time' in rc.get('error'):
+        #     time.sleep(30)
+        #     rc = self.r.get(url, params=params).json()
+        # open('smapi.log', 'w').write(json.dumps(rc))
 
-        descs = {i['classid']: i for i in rc['descriptions']}
+        descs = {i['classid']: i for i in descriptions}
         # items = [descs[i['classid']] for i in rc['assets'] if descs[i['classid']].get('market_hash_name')]
         items = {}
-        for i in rc['assets']:
+        for i in assets:
             if not descs[i['classid']].get('market_hash_name'):  # not marketable?
                 continue
             elif i['classid'] in items.keys():  # duplicate
@@ -174,16 +223,11 @@ class Core(object):
 
     def price(self, id, name):
         # time.sleep(random.randint(15, 25))
-        time.sleep(random.randint(17, 25))
+        # time.sleep(random.randint(17, 25))
+        # time.sleep(1)
         # get item_nameid (this can be skipped when item_nameid is in database)
         # encode name?
         print(name)
-        if 'MajorMinor' in name:  # fix database
-            name.replace('MajorMinor', 'Major-Minor')
-        elif name == '283940-Freddi Fish and the Case of the Missing Kelp Seeds Booster Pack':
-            name = '283940-Freddi Fish and The Case of the Missing Kelp Seeds Booster Pack'
-        elif name == '477310-Space Hole Booster Pack':
-            name = '477310-Space Hole 2016 Booster Pack'
         name = urllib.parse.quote(name)
         url = 'https://steamcommunity.com/market/listings/%s/%s' % (id, name)
         print(url)
@@ -191,24 +235,32 @@ class Core(object):
             rc = self.r.get(url)
             open('smapi.log', 'wb').write(rc.content)
             rc = rc.text  # 753 = steam items?
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.ConnectionError:
             print('>>> connection error')
             time.sleep(10)
             rc = self.r.get(url).text  # 753 = steam items?
         open('log.log', 'w').write(rc)
-        if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc:
+        if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc or 'An error occurred while processing your request.' in rc or '504 Gateway Time-out' in rc:
             print('temporary error, waiting 10 seconds and retrying')
             time.sleep(10)
             rc = self.r.get(url).text  # 753 = steam items?
             open('log.log', 'w').write(rc)
         if "You've made too many requests recently. Please wait and try your request again later." in rc:
             print("You've made too many requests recently. Please wait and try your request again later.")
-            asd
+            raise BaseException("You've made too many requests recently. Please wait and try your request again later.")
+        if 'This item can no longer be bought or sold on the Community Market.' in rc:
+            print('>>>> REMOVED')
+        elif 'There are no listings for this item.' in rc:
+            print('>>>>>>>  00000')
+            return None
+        # elif 'There is no price history available for this item yet.' in rc:
+        #     print('new item, no history yet?')
+        #     return None
 
         # # history parse (only volume for now)
         if 'var line1' in rc:
             history = {}
-            history_raw = json.loads(re.search('var line1\=(\[.+\])', rc).group(1))
+            history_raw = json.loads(re.search(r'var line1\=(\[.+\])', rc).group(1))
             for i in history_raw:
                 i_date = parser.parse(i[0][:-4]).date()
                 if i[0][-6:-4] != '01' and i_date in history.keys():
@@ -219,11 +271,14 @@ class Core(object):
             # average volume
             days = 90
             days = min(datetime.date.today() - next(iter(history)), datetime.timedelta(days=days))  # days cannot be bigger than time since first transaction
-            vol = sum([history[i] for i in history if i > datetime.date.today() - days]) / days.days  # average daily volume in last x days
+            try:
+                vol = sum([history[i] for i in history if i > datetime.date.today() - days]) / days.days  # average daily volume in last x days
+            except ZeroDivisionError:  # no history, this item appeared today
+                vol = 0
         else:
             vol = 0
 
-        item_nameid = re.search('Market_LoadOrderSpread\( ([0-9]+) \);', rc).group(1)
+        item_nameid = re.search(r'Market_LoadOrderSpread\( ([0-9]+) \);', rc).group(1)
 
         # get price
         params = {'country': self.country,
@@ -232,7 +287,8 @@ class Core(object):
                   'item_nameid': item_nameid,
                   'two_factor': 0}
         rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params)
-        if 'The server is temporarily unable to service your request.  Please try again' in rc.text or 'The site is currently unavailable.  Please try again later.' in rc.text:
+        if 'The server is temporarily unable to service your request.  Please try again' in rc.text or 'The site is currently unavailable.  Please try again later.' in rc.text or 'An error occurred while processing your request.' in rc.text or '502 Bad Gateway' in rc.text:
+            print(rc.status_code)
             print('temporary error, retrying after 15 seconds')
             time.sleep(15)
             rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params)
@@ -259,10 +315,12 @@ class Core(object):
         # sell orders
         start = 0
         count = 100
+        # TODO: sell from listings instead of assets - parse more info
         while True:
             params = {'query': '',
                       'start': start,
-                      'count': count}
+                      'count': count,
+                      'norender': 1}
             rc = self.r.get('https://steamcommunity.com/market/mylistings/render/', params=params)
             if '502 Bad Gateway' in rc.text:
                 print('502 Bad Gateway')
@@ -286,98 +344,27 @@ class Core(object):
             start += count
 
         # buy orders
-        rc = self.r.get('https://steamcommunity.com/market/').text
-        bs = BeautifulSoup(rc, 'lxml')
-        divs = bs.findAll('div', {'class': 'market_listing_row market_recent_listing_row'})
-        for div in divs:
-            order_id = int(div.attrs['id'].replace('mybuyorder_', ''))
-            game_name = div.find('span', {'class': 'market_listing_game_name'}).text
-            # item_name = div.find('span', {'class': 'market_listing_item_name'}).a.text
-            game_id, market_hash_name = div.find('span', {'class': 'market_listing_item_name'}).a.attrs['href'].split('/')[-2:]
-            market_hash_name = unquote(market_hash_name)
-            item_id, item_name = re.search('([0-9]+?)\-(.+)', market_hash_name).groups()
-            # item_name = unquote(item_name)  # unquote by bs?
-            # amount = div.span()[0].span.text.replace(' @', '')
-            # amount = div.find('span', {'class': 'market_listing_inline_buyorder_qty'}).text.replace(' @', '')
-            amount, price = list(div.find('span', {'class': 'market_listing_price'}).strings)[1:]
-            amount = amount.replace(' @', '')
-            # price = price.strip()  # remove currency code
-            # TODO: convert different currency
-            price = re.match('([0-9\,]+).+', price.strip()).group(1)
-            price = float(price.replace(',', '.'))
-            orders['buy'].append({'order_id': order_id,
-                                  'game_id': game_id,
-                                  'game_name': game_name,
-                                  'item_id': item_id,
-                                  'item_name': item_name,
-                                  'amount': amount,
-                                  'price': price,
-                                  'market_hash_name': market_hash_name})
+        for i in rc['buy_orders']:
+            print(i)
+            if 'description' not in i:  # TODO: parse data instead
+                continue
+            orders['buy'].append({'order_id': i['buy_orderid'],
+                                  'game_id': i['appid'],
+                                  'game_name': i['description']['type'],
+                                  'item_id': i['description']['market_fee_app'],
+                                  'item_name': i['description']['name'],
+                                  'amount': i['quantity_remaining'],
+                                  'price': float(i['price']) / 100,
+                                  'market_hash_name': i['hash_name']})
         return orders
 
     def sell(self, appid, assetid, contextid, price):
-        if price > 1.59:  # TODO: remove it/configure it
-            # raise SmapiError('expensive item')  # TODO
-            print('expensive item')
-            return False
+        # if price >= 4.01:  # TODO: remove it/configure it
+        #     # raise SmapiError('expensive item')  # TODO
+        #     print('expensive item')
+        #     return False
         _price = int(round(price * 100, 0))
-        # fees
-        if _price < 20:
-            _price -= 2
-        elif _price < 30:
-            _price -= 3
-        elif _price < 40:
-            _price -= 4
-        elif _price < 50:
-            _price -= 6
-        elif _price < 60:
-            _price -= 7
-        elif _price < 70:
-            _price -= 8
-        elif _price < 80:
-            _price -= 9
-        elif _price < 90:
-            _price -= 10
-        elif _price == 90:
-            _price -= 11
-        elif _price < 102:
-            _price -= 12
-        elif _price < 113:
-            _price -= 13
-        elif _price == 113:
-            _price -= 14
-        elif _price < 125:
-            _price -= 15
-        elif _price < 136:
-            _price -= 16
-        elif _price == 136:
-            _price -= 17
-        elif _price < 148:
-            _price -= 18
-        elif _price < 159:
-            _price -= 19
-        elif _price == 159:
-            _price -= 20
-        elif _price < 171:
-            _price -= 21
-        elif _price < 182:
-            _price -= 22
-        elif _price == 182:
-            _price -= 23
-        elif _price == 194:
-            _price -= 24
-        elif _price < 205:
-            _price -= 25
-        elif _price == 205:
-            _price -= 26
-        elif _price < 217:
-            _price -= 27
-        # elif _price < 122:
-        #     _price -= 14
-        # x * 1.15
-        # x * (1/1.150000001490116119)
-        else:
-            raise SmapiError('more fees reduction needs to be implemented')  # TODO
+        _price = priceCutFee(_price)
         data = {'amount': 1,
                 'appid': appid,
                 'assetid': assetid,
@@ -409,8 +396,8 @@ class Core(object):
                 return self.sell(appid=appid, assetid=assetid, contextid=contextid, price=price)
             elif rc['message'] == 'There was a problem listing your item. Refresh the page and try again.':
                 print('There was a problem listing your item. Refresh the page and try again.')
-                # time.sleep(60 * 5)
-                time.sleep(random.randint(5, 20))
+                time.sleep(60 * 5)
+                # time.sleep(random.randint(5, 20))
                 return self.sell(appid=appid, assetid=assetid, contextid=contextid, price=price)
             else:
                 print(rc)
@@ -422,7 +409,7 @@ class Core(object):
         print(price)
         if price < 0.03:  # minimum value
             price = 0.03
-        price_total = int(price * 100 * int(quantity))
+        price_total = int(round(price * 100, 0) * int(quantity))
         data = {'appid': appid,
                 'currency': self.currency,
                 'market_hash_name': market_hash_name,
@@ -431,20 +418,18 @@ class Core(object):
                 'sessionid': self.session_id}
         print(data)
         self.r.headers['Referer'] = 'https://steamcommunity.com/market/listings/%s/%s' % (appid, market_hash_name)
-        try:
-            rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
-        except UnicodeEncodeError:
-            return False
+        rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
         del self.r.headers['Referer']
         print(rc)
         if rc['success'] == 1:
             return rc['buy_orderid']
         elif rc['success'] == 29 and rc['message'] == 'You already have an active buy order for this item. You will need to either cancel that order, or wait for it to be fulfilled before you can place a new order.':
             return True
-        elif rc['success'] in (8, 16, 20):  # 'Sorry! We had trouble hearing back from the Steam servers about your order. Double check whether or not your order has actually been created or filled. If not, then please try again later.'
+        elif rc['success'] in (8, 16, 20, 42):  # 'Sorry! We had trouble hearing back from the Steam servers about your order. Double check whether or not your order has actually been created or filled. If not, then please try again later.'
+            raise BaseException('Sorry! We had trouble hearing back from the Steam servers about your order. Double check whether or not your order has actually been created or filled. If not, then please try again later.')
             print('Sorry! We had trouble hearing back from the Steam servers about your order. Double check whether or not your order has actually been created or filled. If not, then please try again later.')
             time.sleep(60)
-            return self.buy(appid=appid, market_hash_name=market_hash_name, quantity=quantity, price=price, currency=currency)
+            return self.buy(appid=appid, market_hash_name=market_hash_name, quantity=quantity, price=price)
         elif rc['success'] == 25:
             raise SmapiError('You need more wallet balance to make this order.')
         else:
@@ -458,8 +443,8 @@ class Core(object):
         self.r.headers['X-Prototype-Version'] = '1.7'
         rc = self.r.post('https://steamcommunity.com/market/cancelbuyorder/', data=data)
         if '502 Bad Gateway' in rc.text:
-                print('502 Bad Gateway')
-                rc = self.r.post('https://steamcommunity.com/market/cancelbuyorder/', data=data)
+            print('502 Bad Gateway')
+            rc = self.r.post('https://steamcommunity.com/market/cancelbuyorder/', data=data)
         open('smapi.log', 'w').write(rc.text)
         rc = rc.json()
         del self.r.headers['Referer']
@@ -471,9 +456,9 @@ class Core(object):
     def cleanNotifications(self):
         self.r.get('https://steamcommunity.com/id/%s/inventory/' % self.username)
 
-    def confirmTrades(self, android_id):
+    def confirmTrades(self):
         params = {'l': 'english',
-                  'p': android_id,
+                  'p': self.android_id,
                   'a': self.steam_id,
                   'k': base64.b64encode(self.sa.get_confirmation_key('conf')).decode('utf8'),
                   't': self.sa.get_time(),
@@ -484,22 +469,37 @@ class Core(object):
         if "You don't have anything to confirm right now." in rc:
             return True
         else:
-            items = re.findall('id="multiconf_[0-9]+" data-confid="([0-9]+)" data-key="([0-9]+)"', rc)
+            items = re.findall(r'id="multiconf_[0-9]+" data-confid="([0-9]+)" data-key="([0-9]+)"', rc)
             cids = [i[0] for i in items]
             cks = [i[1] for i in items]
-            data = {'op': 'allow',
-                    'p': android_id,
-                    'a': self.steam_id,
-                    'k': base64.b64encode(self.sa.get_confirmation_key('conf')).decode('utf8'),
-                    't': self.sa.get_time(),
-                    'm': 'android',
-                    'tag': 'conf',
-                    'cid[]': cids,
-                    'ck[]': cks}
-            print(data)
-            rc = self.r.post('https://steamcommunity.com/mobileconf/multiajaxop', data=data).json()
-            # open('smapi.log', 'w').write(json.dumps(rc))
-            if rc['success'] is not True:
-                print(rc)
-                raise SmapiError('unknown error during sell confirmation')
+            if len(cids) > 0:
+                data = {'op': 'allow',
+                        'p': self.android_id,
+                        'a': self.steam_id,
+                        'k': base64.b64encode(self.sa.get_confirmation_key('conf')).decode('utf8'),
+                        't': self.sa.get_time(),
+                        'm': 'android',
+                        'tag': 'conf',
+                        'cid[]': cids,
+                        'ck[]': cks}
+                print(data)
+                rc = self.r.post('https://steamcommunity.com/mobileconf/multiajaxop', data=data).json()
+                # open('smapi.log', 'w').write(json.dumps(rc))
+                if rc['success'] is not True:
+                    print(rc)
+                    raise SmapiError('unknown error during sell confirmation')
             return True
+
+    def gems(self):
+        rc = self.r.get('https://steamcommunity.com/tradingcards/boostercreator/').text
+        open('smapi.log', 'w').write(rc)
+        boosters = json.loads(re.search(r'(\[{"appid".+}\])', rc).group(1))
+        for i, d in enumerate(boosters):
+            market_hash_name = '%s-%s Booster Pack' % (d['appid'], unescape(d['name']).replace('/', '-'))
+            p = self.price(753, market_hash_name)
+            if not p:  # there is booster pack?
+                continue
+            boosters[i].update(p)
+            boosters[i]['price'] = int(boosters[i]['price'])
+            yield boosters[i]
+        # return boosters
