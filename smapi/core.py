@@ -183,10 +183,10 @@ class Core(object):
         while rc.get('more_items') == 1:
             params['start_assetid'] = rc['last_assetid']
             rc = self.r.get(url, params=params).json()
-            open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
+            # open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
             assets.extend(rc['assets'])
             descriptions.extend(rc['descriptions'])  # TODO: it's ugly
-        print('Marketable ttems in inventory: %s' % len(assets))
+        # print('Marketable ttems in inventory: %s' % len(assets))
         # if rc.get('error') and 'The request is a duplicate and the action has already occurred in the past, ignored this time' in rc.get('error'):
         #     time.sleep(30)
         #     rc = self.r.get(url, params=params).json()
@@ -224,7 +224,6 @@ class Core(object):
     def price(self, id, name):
         # time.sleep(random.randint(15, 25))
         # time.sleep(random.randint(17, 25))
-        # time.sleep(1)
         # get item_nameid (this can be skipped when item_nameid is in database)
         # encode name?
         print(name)
@@ -240,7 +239,7 @@ class Core(object):
             time.sleep(10)
             rc = self.r.get(url).text  # 753 = steam items?
         open('log.log', 'w').write(rc)
-        if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc or 'An error occurred while processing your request.' in rc or '504 Gateway Time-out' in rc:
+        if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc or 'An error occurred while processing your request.' in rc or '504 Gateway Time-out' in rc or 'The site is currently unavailable.  Please try again later.' in rc:
             print('temporary error, waiting 10 seconds and retrying')
             time.sleep(10)
             rc = self.r.get(url).text  # 753 = steam items?
@@ -250,6 +249,7 @@ class Core(object):
             raise BaseException("You've made too many requests recently. Please wait and try your request again later.")
         if 'This item can no longer be bought or sold on the Community Market.' in rc:
             print('>>>> REMOVED')
+            return None
         elif 'There are no listings for this item.' in rc:
             print('>>>>>>>  00000')
             return None
