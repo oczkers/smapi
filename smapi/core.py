@@ -1,29 +1,20 @@
-import requests
+import httpx
 import re
 import urllib.parse
 import json
 import time
-# import random
-# import pyotp
 import base64
 import datetime
 from html import unescape
 from dateutil import parser
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
-# from bs4 import BeautifulSoup
-# from urllib.parse import unquote
 from steam import guard  # https://github.com/ValvePython/steam
-try:
-    from cookielib import LWPCookieJar
-except ImportError:
-    from http.cookiejar import LWPCookieJar
-# from clint.textui import colored
 
 from .exceptions import SmapiError
 
 headers = {
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:70.0) Gecko/20100101 Firefox/70.0',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:72.0) Gecko/20100101 Firefox/72.0',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Encoding': 'gzip,deflate,sdch',
     'Accept-Language': 'en-US,en;q=0.8',
@@ -88,21 +79,17 @@ class Core(object):
         self.username = username
         self.passwd = passwd
         self.secrets = secrets
-        self.r = requests.Session()  # init/reset requests session object
-        self.r.headers = headers.copy()  # i'm chrome browser now ;-)
-        self.cookies_file = cookies_file
+        self.r = httpx.Client(timeout=300, headers=headers)
         self.currency = currency  # 6 PLN, 3 EUR, 18 UAH
         self.country = country  # PL, ?, UA
         self.android_id = android_id
         self.sa = guard.SteamAuthenticator(secrets=self.secrets)
         # load saved cookies/session
-        if self.cookies_file:
-            self.r.cookies = LWPCookieJar(self.cookies_file)
-            try:
-                self.r.cookies.load(ignore_discard=True)  # is it good idea to load discarded cookies after long time?
-            except IOError:
-                pass
-                # self.r.cookies.save(ignore_discard=True)  # create empty file for cookies
+        try:
+            with open('cookies.json', 'r') as f:
+                self.r.cookies.update(json.load(f))
+        except json.JSONDecodeError:  # file corupted or empty
+            pass
         # encode password
         rc = self.r.get('https://steamcommunity.com/login/home/').text
         open('smapi.log', 'w').write(rc)
@@ -117,8 +104,11 @@ class Core(object):
 
     def saveSession(self):
         '''Saves cookies/session.'''
-        if self.cookies_file:
-            self.r.cookies.save(ignore_discard=True)
+        print(self.r.cookies.keys)  # DEBUG
+        for i in self.r.cookies:  # DEBUG
+            print(f'{i} {self.r.cookies[i]}')  # DEBUG
+        with open('cookies.json', 'w') as f:
+            json.dump({i: self.r.cookies[i] for i in self.r.cookies}, f)  # no get_dict in httpx
 
     def login(self, username, passwd, email_code=None, auth_name=None, twofactor_code=None):
         data = {'username': username, 'donotcache': int(time.time() * 1000)}
@@ -143,7 +133,7 @@ class Core(object):
                 'remember_login': True,
                 'donotcache': int(time.time() * 1000)}
         rc = self.r.post('https://steamcommunity.com/login/dologin/', data=data)
-        open('log.log', 'w').write(rc.text)  # DEBUG
+        open('smapi.log', 'w').write(rc.text)  # DEBUG
         rc = rc.json()
         print(rc)
 
@@ -230,20 +220,21 @@ class Core(object):
         name = urllib.parse.quote(name)
         url = 'https://steamcommunity.com/market/listings/%s/%s' % (id, name)
         print(url)
-        try:
-            rc = self.r.get(url)
-            open('smapi.log', 'wb').write(rc.content)
-            rc = rc.text  # 753 = steam items?
-        except requests.exceptions.ConnectionError:
-            print('>>> connection error')
-            time.sleep(10)
-            rc = self.r.get(url).text  # 753 = steam items?
-        open('log.log', 'w').write(rc)
+        # try:
+        #     rc = self.r.get(url)
+        #     open('smapi.log', 'wb').write(rc.content)
+        #     rc = rc.text  # 753 = steam items?
+        # except httpx.exceptions.NetworkError:
+        #     print('>>> network error')
+        #     time.sleep(10)
+        #     rc = self.r.get(url).text  # 753 = steam items?
+        rc = self.r.get(url).text
+        open('smapi.log', 'w').write(rc)
         if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc or 'An error occurred while processing your request.' in rc or '504 Gateway Time-out' in rc or 'The site is currently unavailable.  Please try again later.' in rc:
             print('temporary error, waiting 10 seconds and retrying')
             time.sleep(10)
             rc = self.r.get(url).text  # 753 = steam items?
-            open('log.log', 'w').write(rc)
+            open('smapi.log', 'w').write(rc)
         if "You've made too many requests recently. Please wait and try your request again later." in rc:
             print("You've made too many requests recently. Please wait and try your request again later.")
             raise BaseException("You've made too many requests recently. Please wait and try your request again later.")
@@ -287,7 +278,8 @@ class Core(object):
                   'item_nameid': item_nameid,
                   'two_factor': 0}
         rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params)
-        if 'The server is temporarily unable to service your request.  Please try again' in rc.text or 'The site is currently unavailable.  Please try again later.' in rc.text or 'An error occurred while processing your request.' in rc.text or '502 Bad Gateway' in rc.text:
+        # if 'The server is temporarily unable to service your request.  Please try again' in rc.text or 'The site is currently unavailable.  Please try again later.' in rc.text or 'An error occurred while processing your request.' in rc.text or '502 Bad Gateway' in rc.text or '500 Internal Server Error' in rc.text:
+        if rc.is_error:
             print(rc.status_code)
             print('temporary error, retrying after 15 seconds')
             time.sleep(15)
@@ -322,8 +314,10 @@ class Core(object):
                       'count': count,
                       'norender': 1}
             rc = self.r.get('https://steamcommunity.com/market/mylistings/render/', params=params)
-            if '502 Bad Gateway' in rc.text:
-                print('502 Bad Gateway')
+            # if '502 Bad Gateway' in rc.text or 'The site is currently unavailable.  Please try again later.' in rc.text:
+            if rc.is_error:
+                print('502 Bad Gateway / site temporary unavailable')
+                time.sleep(5)
                 rc = self.r.get('https://steamcommunity.com/market/mylistings/render/', params=params)
             open('smapi.log', 'w').write(rc.text)
             rc = rc.json()
