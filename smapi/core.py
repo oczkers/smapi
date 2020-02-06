@@ -90,6 +90,8 @@ class Core(object):
                 self.r.cookies.update(json.load(f))
         except json.JSONDecodeError:  # file corupted or empty
             pass
+        except FileNotFoundError:
+            pass
         # encode password
         rc = self.r.get('https://steamcommunity.com/login/home/').text
         open('smapi.log', 'w').write(rc)
@@ -101,14 +103,12 @@ class Core(object):
         self.session_id = re.search('g_sessionID = "(.+?)";', rc).group(1)
         # rc = self.r.get('https://steamcommunity.com/id/oczun/').text
         self.steam_id = re.search('g_steamID = "([0-9]+?)";', rc).group(1)
+        self.saveSession()
 
     def saveSession(self):
         '''Saves cookies/session.'''
-        print(self.r.cookies.keys)  # DEBUG
-        for i in self.r.cookies:  # DEBUG
-            print(f'{i} {self.r.cookies[i]}')  # DEBUG
         with open('cookies.json', 'w') as f:
-            json.dump({i: self.r.cookies[i] for i in self.r.cookies}, f)  # no get_dict in httpx
+            json.dump({cookie.name: cookie.value for cookie in self.r.cookies.jar}, f)  # no get_dict in httpx
 
     def login(self, username, passwd, email_code=None, auth_name=None, twofactor_code=None):
         data = {'username': username, 'donotcache': int(time.time() * 1000)}
@@ -149,7 +149,7 @@ class Core(object):
                 else:
                     twofactor_code = input('two factor code: ')
                 print(twofactor_code)
-                self.login(username, passwd, twofactor_code=twofactor_code)
+                return self.login(username, passwd, twofactor_code=twofactor_code)
             elif rc.get('message') == 'Incorrect login.':
                 print('Incorrect login.')
                 raise BaseException
@@ -157,7 +157,21 @@ class Core(object):
                 # raise GsteamError(rc)
                 print('unknown error')
                 raise BaseException
-        self.saveSession()
+
+        # self.steam_id = rc['transfer_parameters']['steamid']
+        # data = {'steamid': self.steam_id,
+        #         'token_secure': token,
+        #         'auth': auth,
+        #         'remember_login': False,  # ca it be True?
+        #         'webcookie': webcookie}
+        data = rc['transfer_parameters']
+        for url in rc['transfer_urls']:
+            rc = self.r.post(url, data=data).text
+            open('smapi.log', 'w').write(rc)
+        rc = self.r.get('https://steamcommunity.com/my/goto').text
+        open('smapi.log', 'w').write(rc)
+        if 'javascript:Logout();' not in rc:
+            raise SmapiError('unknown error during login')
         return True
 
     def inventory(self, app_id=753, marketable_only=True):
