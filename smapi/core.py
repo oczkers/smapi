@@ -24,10 +24,10 @@ headers = {
     'DNT': '1',
 }
 
-cookies_file = 'cookies.txt'
 
-
-def hashPasswd(passwd, mod, exp):
+def hashPasswd(passwd: str,
+               mod: str,
+               exp: str):
     '''RSA encode password.'''
     mod = int(str(mod), 16)
     exp = int(str(exp), 16)
@@ -53,7 +53,7 @@ def hashPasswd(passwd, mod, exp):
 
 #     return c_price
 
-def priceCutFee(_price):
+def priceCutFee(_price: int) -> int:
     p = _price
     fee = 2  # <22
     p -= 21
@@ -74,8 +74,14 @@ def priceCutFee(_price):
     return _price - fee
 
 
-class Core(object):
-    def __init__(self, username, passwd, secrets=None, currency=3, country='PL', android_id=None):
+class Core:
+    def __init__(self,
+                 username: str,
+                 passwd: str,
+                 secrets: dict = None,
+                 currency: int = 3,
+                 country: str = 'PL',
+                 android_id: str = None) -> None:
         self.username = username
         self.passwd = passwd
         self.secrets = secrets
@@ -105,12 +111,18 @@ class Core(object):
         self.steam_id = re.search('g_steamID = "([0-9]+?)";', rc).group(1)
         self.saveSession()
 
-    def saveSession(self):
+    def saveSession(self) -> None:
         '''Saves cookies/session.'''
         with open('cookies.json', 'w') as f:
             json.dump({cookie.name: cookie.value for cookie in self.r.cookies.jar}, f)  # no get_dict in httpx
 
-    def login(self, username, passwd, email_code=None, auth_name=None, twofactor_code=None):
+    def login(self,
+              username: str,
+              passwd: str,
+              email_code: str = None,
+              auth_name: str = None,
+              twofactor_code: str = None) -> bool:
+        self.r.headers['X-Requested-With'] = 'XMLHttpRequest'
         data = {'username': username, 'donotcache': int(time.time() * 1000)}
         rc = self.r.post('https://steamcommunity.com/login/getrsakey/', data=data).json()
         if not rc['success']:
@@ -153,6 +165,8 @@ class Core(object):
             elif rc.get('message') == 'Incorrect login.':
                 print('Incorrect login.')
                 raise BaseException
+            elif rc.get('message') == 'There have been too many login failures from your network in a short time period.  Please wait and try again later.':
+                raise BaseException('ip blocked')
             else:
                 # raise GsteamError(rc)
                 print('unknown error')
@@ -165,16 +179,19 @@ class Core(object):
         #         'remember_login': False,  # ca it be True?
         #         'webcookie': webcookie}
         data = rc['transfer_parameters']
+        del self.r.headers['X-Requested-With']
+        # self.r.headers['Referer'] = 'https://steamcommunity.com/login/home/?goto='
         for url in rc['transfer_urls']:
             rc = self.r.post(url, data=data).text
             open('smapi.log', 'w').write(rc)
-        rc = self.r.get('https://steamcommunity.com/my/goto').text
+        # print({cookie.name: cookie.value for cookie in self.r.cookies.jar})
+        rc = self.r.get('https://steamcommunity.com/my/goto').text  # canceles cookies - request is wrong here because there are two different session_ids for domains?
         open('smapi.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
             raise SmapiError('unknown error during login')
         return True
 
-    def inventory(self, app_id=753, marketable_only=True):
+    def inventory(self, app_id: int = 753, marketable_only: bool = True) -> dict:
         params = {'l': 'english',
                   'count': 2000}
         if marketable_only:
@@ -215,7 +232,7 @@ class Core(object):
 
         return items
 
-    def unpack(self, app_id, item_id):  # unpack booster
+    def unpack(self, app_id, item_id) -> bool:  # unpack booster
         data = {'appid': app_id,
                 'communityitemid': item_id,
                 'sessionid': self.session_id}
@@ -315,7 +332,7 @@ class Core(object):
                 'buy': buy,
                 'vol': vol}
 
-    def orders(self):  # TODO: login required to work of course
+    def orders(self) -> dict:  # TODO: login required to work of course
         orders = {'buy': [],
                   'sell': []}
         # sell orders
@@ -366,7 +383,7 @@ class Core(object):
                                   'market_hash_name': i['hash_name']})
         return orders
 
-    def sell(self, appid, assetid, contextid, price):
+    def sell(self, appid, assetid, contextid, price) -> bool:
         # if price >= 4.01:  # TODO: remove it/configure it
         #     # raise SmapiError('expensive item')  # TODO
         #     print('expensive item')
@@ -443,7 +460,7 @@ class Core(object):
         else:
             raise SmapiError('unknown status')
 
-    def cancelBuy(self, order_id):
+    def cancelBuy(self, order_id) -> bool:
         data = {'buy_orderid': order_id,
                 'sessionid': self.session_id}
         self.r.headers['Referer'] = 'https://steamcommunity.com/market/'
@@ -461,10 +478,10 @@ class Core(object):
         # print(rc)
         return rc['success'] == 1
 
-    def cleanNotifications(self):
+    def cleanNotifications(self) -> None:
         self.r.get('https://steamcommunity.com/id/%s/inventory/' % self.username)
 
-    def confirmTrades(self):
+    def confirmTrades(self) -> bool:
         params = {'l': 'english',
                   'p': self.android_id,
                   'a': self.steam_id,
