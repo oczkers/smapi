@@ -78,10 +78,10 @@ class Core:
     def __init__(self,
                  username: str,
                  passwd: str,
-                 secrets: dict = None,
-                 currency: int = 3,
-                 country: str = 'PL',
-                 android_id: str = None) -> None:
+                 secrets: dict,
+                 currency: int,  # default to USD?
+                 country: str,  # default to Germany?
+                 android_id: str) -> None:
         self.username = username
         self.passwd = passwd
         self.secrets = secrets
