@@ -9,7 +9,7 @@ from html import unescape
 from dateutil import parser
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
-from steam import guard  # https://github.com/ValvePython/steam
+from steam import guard  # https://github.com/ValvePython/steam used for mobile confirmations, this should implemented without external library
 
 from .exceptions import SmapiError
 
@@ -27,7 +27,7 @@ headers = {
 
 def hashPasswd(passwd: str,
                mod: str,
-               exp: str):
+               exp: str) -> bytes:
     '''RSA encode password.'''
     mod = int(str(mod), 16)
     exp = int(str(exp), 16)
@@ -113,8 +113,9 @@ class Core:
 
     def saveSession(self) -> None:
         '''Saves cookies/session.'''
+        # print([i for i in self.r.cookies.jar])
         with open('cookies.json', 'w') as f:
-            json.dump({cookie.name: cookie.value for cookie in self.r.cookies.jar}, f)  # no get_dict in httpx
+            json.dump(self.r.cookies.jar.__dict__, f)
 
     def login(self,
               username: str,
