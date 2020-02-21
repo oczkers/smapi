@@ -88,6 +88,7 @@ class Core:
         self.secrets = secrets
         self.cookiejar = LWPCookieJar('cookies.txt')
         self.r = httpx.Client(timeout=300, headers=headers, cookies=self.cookiejar)
+        # self.r.headers.encoding = 'utf8'  # temporary
         self.currency = currency  # 6 PLN, 3 EUR, 18 UAH
         self.country = country  # PL, ?, UA
         self.android_id = android_id
@@ -441,7 +442,7 @@ class Core:
                 'quantity': quantity,
                 'sessionid': self.session_id}
         print(data)
-        self.r.headers['Referer'] = 'https://steamcommunity.com/market/listings/%s/%s' % (appid, market_hash_name)
+        self.r.headers['Referer'] = f'https://steamcommunity.com/market/listings/{appid}/{market_hash_name}'
         rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
         del self.r.headers['Referer']
         print(rc)
