@@ -5,7 +5,6 @@ import json
 import time
 import base64
 import datetime
-from http.cookiejar import LWPCookieJar
 from html import unescape
 from dateutil import parser
 from Crypto.PublicKey import RSA
@@ -86,16 +85,18 @@ class Core:
         self.username = username
         self.passwd = passwd
         self.secrets = secrets
-        self.cookiejar = LWPCookieJar('cookies.txt')
-        self.r = httpx.Client(timeout=300, headers=headers, cookies=self.cookiejar)
         # self.r.headers.encoding = 'utf8'  # temporary
+        self.r = httpx.Client(timeout=300, headers=headers)
         self.currency = currency  # 6 PLN, 3 EUR, 18 UAH
         self.country = country  # PL, ?, UA
         self.android_id = android_id
         self.sa = guard.SteamAuthenticator(secrets=self.secrets)
         # load saved cookies/session
         try:
-            self.cookiejar.load()
+            with open('cookies.json', 'r') as f:
+                self.r.cookies.update(json.load(f))
+        except json.JSONDecodeError:  # file corupted or empty
+            pass
         except FileNotFoundError:
             pass
         # encode password
@@ -114,7 +115,8 @@ class Core:
     def saveSession(self) -> None:
         '''Saves cookies/session.'''
         # print([i for i in self.r.cookies.jar])
-        self.cookiejar.save()
+        with open('cookies.json', 'w') as f:
+            json.dump(self.r.cookies.jar.__dict__, f)
 
     def login(self,
               username: str,
