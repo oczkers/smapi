@@ -27,7 +27,7 @@ headers = {
 
 def hashPasswd(passwd: str,
                mod: str,
-               exp: str):
+               exp: str) -> bytes:
     '''RSA encode password.'''
     mod = int(str(mod), 16)
     exp = int(str(exp), 16)
@@ -114,8 +114,10 @@ class Core:
 
     def saveSession(self) -> None:
         '''Saves cookies/session.'''
+        # print([i for i in self.r.cookies.jar])
         with open('cookies.json', 'w') as f:
-            json.dump({cookie.name: cookie.value for cookie in self.r.cookies.jar}, f)  # no get_dict in httpx
+            # sessionid and browserid are different for domains, we need only steamcommunity.com (+ shared)
+            json.dump({cookie.name: cookie.value for cookie in self.r.cookies.jar if not (cookie.name in ('sessionid', 'browserid') and cookie.domain in ('store.steampowered.com', 'help.steampowered.com'))}, f)  # no get_dict in httpx
 
     def login(self,
               username: str,
