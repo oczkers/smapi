@@ -103,6 +103,8 @@ class Core:
         rc = self.r.get('https://steamcommunity.com/login/home/').text
         open('smapi.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
+            print('RELOGIN')
+            self.r.cookies = {}  # reset cookies
             self.login(username, passwd)
             # TODO?: detect session_id in login
             rc = self.r.get('https://steamcommunity.com/login/home/').text
@@ -140,7 +142,7 @@ class Core:
                 # 'oauth_client_id': '',  # used in mobile app
                 'twofactorcode': twofactor_code or '',  # is it even working here?
                 'emailauth': email_code or '',
-                'loginfriendlyname': auth_name or '',
+                'loginfriendlyname': auth_name or 'smapi',
                 'captchagid': -1,
                 'captcha_text': '',
                 'emailsteamid': '',
@@ -189,7 +191,7 @@ class Core:
             open('smapi.log', 'w').write(rc)
         # print({cookie.name: cookie.value for cookie in self.r.cookies.jar})
         rc = self.r.get('https://steamcommunity.com/my/goto').text  # canceles cookies - request is wrong here because there are two different session_ids for domains?
-        open('smapi.log', 'w').write(rc)
+        open('smapi2.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
             raise SmapiError('unknown error during login')
         return True
