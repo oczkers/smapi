@@ -264,7 +264,13 @@ class Core:
         #     print('>>> network error')
         #     time.sleep(10)
         #     rc = self.r.get(url).text  # 753 = steam items?
-        rc = self.r.get(url).text
+        rc = self.r.get(url)
+        if rc.status_code in (500, 502):
+            print('temporary error, waiting 10 seconds and retrying')
+            time.sleep(10)
+            rc = self.r.get(url)
+        print(rc.status_code)
+        rc = rc.text
         open('smapi.log', 'w').write(rc)
         if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc or 'An error occurred while processing your request.' in rc or '504 Gateway Time-out' in rc or 'The site is currently unavailable.  Please try again later.' in rc:
             print('temporary error, waiting 10 seconds and retrying')
