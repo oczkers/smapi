@@ -100,7 +100,9 @@ class Core:
         except FileNotFoundError:
             pass
         # encode password
-        rc = self.r.get('https://steamcommunity.com/login/home/').text
+        rc = self.r.get('https://steamcommunity.com/login/home/')
+        self.username = str(rc.url).split('/')[-1]  # gonna be false if not logged
+        rc = rc.text
         open('smapi.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
             print('RELOGIN')
@@ -202,8 +204,9 @@ class Core:
         if marketable_only:
             params['market'] = 1
         url = 'https://steamcommunity.com/inventory/%s/%s/6' % (self.steam_id, app_id)  # 6 = contextid
+        print(url)
         rc = self.r.get(url, params=params).json()
-        # open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
+        open('smapi.log', 'w').write(json.dumps(rc))  # DEBUG
         assets = rc['assets']
         descriptions = rc['descriptions']
         while rc.get('more_items') == 1:
@@ -539,3 +542,51 @@ class Core:
             boosters[i]['price'] = int(boosters[i]['price'])
             yield boosters[i]
         # return boosters
+
+    def gamesIds(self):
+        """Return all owned games (and dlc?)."""
+        # TODO: https://store.steampowered.com/dynamicstore/userdata/
+        # TODO: wishlist etc.
+        # rc = self.r.get(f'https://steamcommunity.com/id/{self.username}/games/', params={'tab': 'all'}).text
+        # rg_games = json.loads(re.search(r'var rgGames = (\[.+?\]);', rc).group(1))
+        # app_ids = [i['appid'] for i in rg_games]
+        rc = self.r.get('https://store.steampowered.com/dynamicstore/userdata/').json()
+        return rc['rgOwnedApps']
+
+    def addGame(self, app_id):
+        # only free for now
+        rc = self.r.get(f'https://store.steampowered.com/app/{app_id}/').text
+        if 'action="https://store.steampowered.com/checkout/addfreelicense/"' not in rc:
+            return False
+        snr = re.search('name="snr" value="(.+?)"', rc).group(1)
+        originating_snr = re.search('name="originating_snr" value="(.+?)"', rc).group(1)
+        # name="action" value="add_to_cart"
+        # name="sessionid" value="0400dd5fd377323340d11bc7"
+        sub_id = re.search('name="subid" value="([0-9]+?)"', rc).group(1)
+        data = {'snr': snr,
+                'originating_snr': originating_snr,
+                'action': 'add_to_cart',
+                'sessionid': self.session_id,
+                'subid': sub_id}
+        rc = self.r.post('https://store.steampowered.com/checkout/addfreelicense/', data=data).text
+        # TODO: validate response
+        if 'There was a problem adding this product to your Steam account.' in rc:
+            print('ERROR, probably base game is required')
+        elif 'is now registered to your account on Steam.' not in rc:
+            open('smapi.log', 'w').write(rc)
+            raise Exception()  # TODO: proper exception / return False
+        return True
+
+    def addGameSubid(self, sub_id):
+        # TODO: use it instead of app_id OR merge
+        data = {'ajax': True,
+                'sessionid': self.session_id}
+        rc = self.r.post(f'https://store.steampowered.com/checkout/addfreelicense/{sub_id}', data=data)
+        # TODO: validate somehow but response is exactly the same is already own or "purhased"
+        if rc.status_code == 500:
+            raise Exception(f'cannot activate: {rc.text}')
+        elif rc.json() != []:
+            print(rc.status_code)
+            print(rc.headers)
+            print(rc.text)
+            raise Exception()
