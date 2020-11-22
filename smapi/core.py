@@ -245,7 +245,9 @@ class Core:
                 'communityitemid': item_id,
                 'sessionid': self.session_id}
         self.r.headers['X-Requested-With'] = 'XMLHttpRequest'
-        rc = self.r.post('https://steamcommunity.com/id/%s/ajaxunpackbooster/' % self.username, data=data).json()
+        rc = self.r.post('https://steamcommunity.com/id/%s/ajaxunpackbooster/' % self.username, data=data)
+        open('smapi.log', 'w').write(rc.text)  # DEBUG
+        rc = rc.json()
         del self.r.headers['X-Requested-With']
         open('smapi.log', 'w').write(json.dumps(rc))
         return rc['success'] == 1
