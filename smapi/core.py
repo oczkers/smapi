@@ -277,7 +277,7 @@ class Core:
         print(rc.status_code)
         rc = rc.text
         open('smapi.log', 'w').write(rc)
-        if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc or 'An error occurred while processing your request.' in rc or '504 Gateway Time-out' in rc or 'The site is currently unavailable.  Please try again later.' in rc:
+        if 'There was an error communicating with the network. Please try again later.' in rc or 'There was an error getting listings for this item. Please try again later.' in rc or '502 Bad Gateway' in rc or 'An error occurred while processing your request.' in rc or '504 Gateway Time-out' in rc or 'The site is currently unavailable.  Please try again later.' in rc or 'Market_LoadOrderSpread(  );' in rc:
             print('temporary error, waiting 10 seconds and retrying')
             time.sleep(10)
             rc = self.r.get(url).text  # 753 = steam items?
@@ -415,7 +415,7 @@ class Core:
         print(data)
         self.r.headers['Referer'] = 'https://steamcommunity.com/id/%s/inventory?modal=1&market=1' % self.username
         rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data)
-        if '502 Bad Gateway' in rc.text or rc.status_code == 503:
+        if '502 Bad Gateway' in rc.text or rc.status_code == 503 or 'We were unable to service your request. Please try again later.' in rc.text:
             print('502/503, retrying in 5 seconds')
             time.sleep(5)
             rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data)
