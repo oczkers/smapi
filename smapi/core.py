@@ -415,12 +415,17 @@ class Core:
         print(data)
         self.r.headers['Referer'] = 'https://steamcommunity.com/id/%s/inventory?modal=1&market=1' % self.username
         rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data)
-        if '502 Bad Gateway' in rc.text or rc.status_code == 503 or 'We were unable to service your request. Please try again later.' in rc.text:
-            print('502/503, retrying in 5 seconds')
-            time.sleep(5)
+        if '502 Bad Gateway' in rc.text or rc.status_code == 503 or 'We were unable to service your request. Please try again later.' in rc.text or rc.status_code == 500:
+            print('500/502/503, retrying in 15 seconds')
+            time.sleep(15)
             rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data)
         open('smapi.log', 'w').write(rc.text)
-        rc = rc.json()
+        try:
+            rc = rc.json()
+        except Exception:
+            print(rc.headers)
+            print(rc.status_code)
+            raise
         del self.r.headers['Referer']
         if not rc:
             raise SmapiError('invalid response')
