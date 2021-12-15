@@ -33,7 +33,7 @@ def hashPasswd(passwd: str,
     exp = int(str(exp), 16)
     rsa = RSA.construct((mod, exp))
     cipher = PKCS1_v1_5.new(rsa)
-    return base64.b64encode(cipher.encrypt(passwd.encode()))
+    return base64.b64encode(cipher.encrypt(passwd.encode())).decode()
 
 
 # def priceCutFee(price):  # almost good
@@ -151,6 +151,7 @@ class Core:
                 'rsatimestamp': rc['timestamp'],
                 'remember_login': True,
                 'donotcache': int(time.time() * 1000)}
+        print(data)
         rc = self.r.post('https://steamcommunity.com/login/dologin/', data=data)
         open('smapi.log', 'w').write(rc.text)  # DEBUG
         rc = rc.json()
@@ -168,7 +169,7 @@ class Core:
                 else:
                     twofactor_code = input('two factor code: ')
                 print(twofactor_code)
-                return self.login(username, passwd, twofactor_code=twofactor_code)
+                return self.login(username, passwd, twofactor_code=twofactor_code)  # TODO: rewrite to not launch infinite loop ^^
             elif rc.get('message') == 'Incorrect login.':
                 print('Incorrect login.')
                 raise BaseException
@@ -247,7 +248,8 @@ class Core:
         self.r.headers['X-Requested-With'] = 'XMLHttpRequest'
         rc = self.r.post('https://steamcommunity.com/id/%s/ajaxunpackbooster/' % self.username, data=data)
         open('smapi.log', 'w').write(rc.text)  # DEBUG
-        rc = rc.json()
+        # rc = rc.json()  # json.decoder.JSONDecodeError: Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)
+        rc = json.loads(rc.content.decode('utf-8-sig'))
         del self.r.headers['X-Requested-With']
         open('smapi.log', 'w').write(json.dumps(rc))
         return rc['success'] == 1
@@ -461,9 +463,11 @@ class Core:
                 'market_hash_name': market_hash_name,
                 'price_total': price_total,
                 'quantity': quantity,
-                'sessionid': self.session_id}
+                'sessionid': self.session_id,
+                'billing_state': '',
+                'save_my_address': 0}
         print(data)
-        self.r.headers['Referer'] = f'https://steamcommunity.com/market/listings/{appid}/{market_hash_name}'
+        self.r.headers['Referer'] = f'https://steamcommunity.com/market/listings/{appid}/{market_hash_name.encode()}'
         rc = self.r.post('https://steamcommunity.com/market/createbuyorder/', data=data).json()
         del self.r.headers['Referer']
         print(rc)
