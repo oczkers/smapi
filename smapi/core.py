@@ -5,6 +5,7 @@ import json
 import time
 import base64
 import datetime
+import random
 from html import unescape
 from dateutil import parser
 from Crypto.PublicKey import RSA
@@ -13,15 +14,22 @@ from steam import guard  # https://github.com/ValvePython/steam
 
 from .exceptions import SmapiError
 
+# headers = {
+#     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:72.0) Gecko/20100101 Firefox/72.0',
+#     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+#     'Accept-Encoding': 'gzip,deflate,sdch',
+#     'Accept-Language': 'en-US,en;q=0.8',
+#     # 'Accept-Charset': 'utf-8, iso-8859-1, utf-16, *;q=0.1',
+#     # 'Connection': 'keep-alive',
+#     # 'Keep-Alive': '300',
+#     'DNT': '1',
+# }
+
 headers = {
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:72.0) Gecko/20100101 Firefox/72.0',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Encoding': 'gzip,deflate,sdch',
-    'Accept-Language': 'en-US,en;q=0.8',
-    # 'Accept-Charset': 'utf-8, iso-8859-1, utf-16, *;q=0.1',
-    # 'Connection': 'keep-alive',
-    # 'Keep-Alive': '300',
-    'DNT': '1',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'en-US,en;q=0.9'
 }
 
 
@@ -86,7 +94,7 @@ class Core:
         self.passwd = passwd
         self.secrets = secrets
         # self.r.headers.encoding = 'utf8'  # temporary
-        self.r = httpx.Client(timeout=300, headers=headers)
+        self.r = httpx.Client(timeout=300, headers=headers, follow_redirects=True)
         self.currency = currency  # 6 PLN, 3 EUR, 18 UAH
         self.country = country  # PL, ?, UA
         self.android_id = android_id
@@ -106,7 +114,7 @@ class Core:
         open('smapi.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
             print('RELOGIN')
-            self.r.cookies = {}  # reset cookies
+            # self.r.cookies = {}  # reset cookies
             self.login(username, passwd)
             # TODO?: detect session_id in login
             rc = self.r.get('https://steamcommunity.com/login/home/').text
@@ -130,6 +138,7 @@ class Core:
               auth_name: str = None,
               twofactor_code: str = None) -> bool:
         self.r.headers['X-Requested-With'] = 'XMLHttpRequest'
+        self.r.headers['Referer'] = 'https://steamcommunity.com/login/home/'
         data = {'username': username, 'donotcache': int(time.time() * 1000)}
         rc = self.r.post('https://steamcommunity.com/login/getrsakey/', data=data).json()
         if not rc['success']:
@@ -161,7 +170,9 @@ class Core:
             if rc.get('emailauth_needed'):
                 email_code = input('email auth code: ')
                 self.login(username, passwd, email_code=email_code, auth_name=auth_name)
-            elif rc.get('requires_twofactor'):
+            elif rc.get('requires_twofactor') is True:
+                if twofactor_code is not None:
+                    raise BaseException('requires_twofactor after requires_twofactor, probably secrets changed and we cannot generate good code')
                 print('two factor')
                 if self.secrets:
                     # self.sa = guard.SteamAuthenticator(secrets=self.secrets)  # initted in __init__
@@ -192,7 +203,9 @@ class Core:
         for url in rc['transfer_urls']:
             rc = self.r.post(url, data=data).text
             open('smapi.log', 'w').write(rc)
-        # print({cookie.name: cookie.value for cookie in self.r.cookies.jar})
+        print(self.r.cookies.jar)
+        print({cookie.name: cookie.value for cookie in self.r.cookies.jar})
+        self.r.cookies.update({cookie.name: cookie.value for cookie in self.r.cookies.jar})
         rc = self.r.get('https://steamcommunity.com/my/goto').text  # canceles cookies - request is wrong here because there are two different session_ids for domains?
         open('smapi2.log', 'w').write(rc)
         if 'javascript:Logout();' not in rc:
@@ -213,7 +226,7 @@ class Core:
         while rc.get('more_items') == 1:
             params['start_assetid'] = rc['last_assetid']
             rc = self.r.get(url, params=params).json()
-            # open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
+            open('inventory.txt', 'w').write(json.dumps(rc))  # DEBUG
             assets.extend(rc['assets'])
             descriptions.extend(rc['descriptions'])  # TODO: it's ugly
         # print('Marketable ttems in inventory: %s' % len(assets))
@@ -257,6 +270,7 @@ class Core:
     def price(self, id, name):
         # time.sleep(random.randint(15, 25))
         # time.sleep(random.randint(17, 25))
+        # time.sleep(60)
         # get item_nameid (this can be skipped when item_nameid is in database)
         # encode name?
         print(name)
@@ -321,6 +335,10 @@ class Core:
         item_nameid = re.search(r'Market_LoadOrderSpread\( ([0-9]+) \);', rc).group(1)
 
         # get price
+
+        self.r.headers['Referer'] = url
+        time.sleep(5)  # 5 works great
+
         params = {'country': self.country,
                   'language': 'english',
                   'currency': self.currency,
@@ -330,9 +348,12 @@ class Core:
         # if 'The server is temporarily unable to service your request.  Please try again' in rc.text or 'The site is currently unavailable.  Please try again later.' in rc.text or 'An error occurred while processing your request.' in rc.text or '502 Bad Gateway' in rc.text or '500 Internal Server Error' in rc.text:
         if rc.is_error:
             print(rc.status_code)
+            print(rc.headers)
             print('temporary error, retrying after 15 seconds')
             time.sleep(15)
             rc = self.r.get('https://steamcommunity.com/market/itemordershistogram', params=params)
+            if rc.is_error:
+                raise BaseException('still error')
         open('smapi.log', 'w').write(rc.text)
         rc = rc.json()
         if rc['success'] == 16:  # DEBUG?
@@ -344,6 +365,9 @@ class Core:
         buy_min = int(rc['highest_buy_order'] or 0) / 100
         sell = [(i[0], i[1]) for i in rc['sell_order_graph']]
         buy = [(i[0], i[1]) for i in rc['buy_order_graph']]
+
+        del self.r.headers['Referer']
+
         return {'sell_min': sell_min,
                 'sell': sell,
                 'buy_min': buy_min,
@@ -402,6 +426,7 @@ class Core:
         return orders
 
     def sell(self, appid, assetid, contextid, price) -> bool:
+        # TODO: {"success":false,"message":"The item specified is no longer in your inventory or is not allowed to be traded on the Community Market."}
         # if price >= 4.01:  # TODO: remove it/configure it
         #     # raise SmapiError('expensive item')  # TODO
         #     print('expensive item')
@@ -422,6 +447,7 @@ class Core:
             time.sleep(15)
             rc = self.r.post('https://steamcommunity.com/market/sellitem/', data=data)
         open('smapi.log', 'w').write(rc.text)
+        print(rc.text)  # DEBUG
         try:
             rc = rc.json()
         except Exception:
@@ -507,21 +533,28 @@ class Core:
         self.r.get('https://steamcommunity.com/id/%s/inventory/' % self.username)
 
     def confirmTrades(self) -> bool:
+        print('> Confirming trades')
         params = {'l': 'english',
                   'p': self.android_id,
                   'a': self.steam_id,
-                  'k': base64.b64encode(self.sa.get_confirmation_key('conf')).decode('utf8'),
+                  'k': base64.b64encode(self.sa.get_confirmation_key('list')).decode('utf8'),
                   't': self.sa.get_time(),
-                  'm': 'android',
-                  'tag': 'conf'}
-        rc = self.r.get('https://steamcommunity.com/mobileconf/conf', params=params).text
+                  'm': 'react',
+                  'tag': 'list'}
+        rc = self.r.get('https://steamcommunity.com/mobileconf/getlist', params=params).text
         open('smapi.log', 'w').write(rc)
         if "You don't have anything to confirm right now." in rc:
             return True
+        elif 'It looks like your Steam Guard Mobile Authenticator is providing incorrect Steam Guard codes.' in rc:
+            raise SmapiError('It looks like your Steam Guard Mobile Authenticator is providing incorrect Steam Guard codes.')
         else:
-            items = re.findall(r'id="multiconf_[0-9]+" data-confid="([0-9]+)" data-key="([0-9]+)"', rc)
-            cids = [i[0] for i in items]
-            cks = [i[1] for i in items]
+            cids = []
+            cks = []
+            rc = json.loads(rc)
+            for i in rc['conf']:
+                if i['type_name'] == 'Market Listing':
+                    cids.append(i['id'])
+                    cks.append(i['nonce'])
             if len(cids) > 0:
                 data = {'op': 'allow',
                         'p': self.android_id,
